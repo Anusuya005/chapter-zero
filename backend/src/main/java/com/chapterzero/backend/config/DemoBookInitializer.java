@@ -23,10 +23,12 @@ public class DemoBookInitializer {
             // CREATE DEMO BOOK
             // =====================================================
 
-            Book book = bookRepository
-                    .findByTitleIgnoreCase(
-                            "Alice's Adventures in Wonderland"
-                    )
+            Book book = bookRepository.findAll().stream()
+                    .filter(existingBook -> existingBook.getTitle() != null
+                            && existingBook.getTitle().equalsIgnoreCase(
+                                    "Alice's Adventures in Wonderland"
+                            ))
+                    .findFirst()
                     .orElse(null);
 
             if (book == null) {
