@@ -191,8 +191,27 @@ function App() {
       const initialProgress = {};
 
       data.forEach((item) => {
-        initialProgress[item.id] =
-          item.currentPage ?? 0;
+        // READ books are always complete
+        if (
+          item.status === "READ" &&
+          Number(item.totalPages) > 0
+        ) {
+          initialProgress[item.id] =
+            Number(item.totalPages);
+        }
+
+        // WANT_TO_READ books always start at zero
+        else if (
+          item.status === "WANT_TO_READ"
+        ) {
+          initialProgress[item.id] = 0;
+        }
+
+        // CURRENTLY_READING uses the saved current page
+        else {
+          initialProgress[item.id] =
+            Number(item.currentPage) || 0;
+        }
       });
 
       setProgressValues(initialProgress);
@@ -663,8 +682,85 @@ function App() {
         );
       }
 
-      const updatedBook =
+      let updatedBook =
         await response.json();
+
+      const totalPages =
+        Number(updatedBook.totalPages) || 0;
+
+      // -------------------------------------------------------
+      // READ = automatically complete the book
+      // -------------------------------------------------------
+
+      if (
+        status === "READ" &&
+        totalPages > 0
+      ) {
+        const progressResponse =
+          await apiFetch(
+            `/api/user-books/${userBookId}/progress?currentPage=${totalPages}&totalPages=${totalPages}`,
+            {
+              method: "PUT",
+            }
+          );
+
+        if (progressResponse.ok) {
+          updatedBook =
+            await progressResponse.json();
+        }
+      }
+
+      // -------------------------------------------------------
+      // WANT_TO_READ = automatically reset progress
+      // -------------------------------------------------------
+
+      if (
+        status === "WANT_TO_READ"
+      ) {
+        const progressResponse =
+          await apiFetch(
+            `/api/user-books/${userBookId}/progress?currentPage=0${
+              totalPages > 0
+                ? `&totalPages=${totalPages}`
+                : ""
+            }`,
+            {
+              method: "PUT",
+            }
+          );
+
+        if (progressResponse.ok) {
+          updatedBook =
+            await progressResponse.json();
+        }
+      }
+
+      // -------------------------------------------------------
+      // KEEP LOCAL PROGRESS IN SYNC
+      // -------------------------------------------------------
+
+      setProgressValues(
+        (previous) => ({
+          ...previous,
+
+          [updatedBook.id]:
+            updatedBook.status ===
+            "READ"
+              ? Number(
+                  updatedBook.totalPages
+                ) || 0
+              : updatedBook.status ===
+                "WANT_TO_READ"
+              ? 0
+              : Number(
+                  updatedBook.currentPage
+                ) || 0,
+        })
+      );
+
+      // -------------------------------------------------------
+      // UPDATE LIBRARY
+      // -------------------------------------------------------
 
       setLibrary((previous) =>
         previous.map((item) =>
@@ -674,6 +770,10 @@ function App() {
         )
       );
 
+      // -------------------------------------------------------
+      // UPDATE CUSTOM SHELF
+      // -------------------------------------------------------
+
       setCustomShelfBooks(
         (previous) =>
           previous.map((item) =>
@@ -682,6 +782,10 @@ function App() {
               : item
           )
       );
+
+      // -------------------------------------------------------
+      // UPDATE SELECTED BOOK
+      // -------------------------------------------------------
 
       setSelectedBook(
         (previous) =>
@@ -770,6 +874,25 @@ function App() {
 
       const updatedBook =
         await response.json();
+
+      // Keep local progress state synchronized
+      setProgressValues(
+        (previous) => ({
+          ...previous,
+          [updatedBook.id]:
+            updatedBook.status ===
+            "READ"
+              ? Number(
+                  updatedBook.totalPages
+                ) || 0
+              : updatedBook.status ===
+                "WANT_TO_READ"
+              ? 0
+              : Number(
+                  updatedBook.currentPage
+                ) || 0,
+        })
+      );
 
       setLibrary((previous) =>
         previous.map((item) =>
@@ -1266,21 +1389,32 @@ function App() {
   // =========================================================
 
   const getProgress = (item) => {
-    if (
-      !item.totalPages ||
-      item.totalPages <= 0
-    ) {
+    // READ = always 100%
+    if (item.status === "READ") {
+      return 100;
+    }
+
+    // WANT TO READ = always 0%
+    if (item.status === "WANT_TO_READ") {
       return 0;
     }
 
+    // CURRENTLY READING = based on pages
+    const totalPages =
+      Number(item.totalPages) || 0;
+
     const currentPage =
-      item.currentPage || 0;
+      Number(item.currentPage) || 0;
+
+    if (totalPages <= 0) {
+      return 0;
+    }
 
     return Math.min(
       100,
       Math.round(
         (currentPage /
-          item.totalPages) *
+          totalPages) *
           100
       )
     );
@@ -1863,6 +1997,10 @@ function App() {
         Number(item.totalPages) > 0
     );
 
+  // ---------------------------------------------------------
+  // PAGES READ
+  // ---------------------------------------------------------
+
   const pagesRead =
     library.reduce((total, item) => {
       const totalPages =
@@ -1871,19 +2009,33 @@ function App() {
       const currentPage =
         Number(item.currentPage) || 0;
 
+      // READ books contribute their full page count
       if (item.status === "READ") {
-        return total +
-          (totalPages || currentPage);
+        return total + totalPages;
       }
 
-      return total +
-        Math.min(currentPage, totalPages || currentPage);
+      // WANT_TO_READ books contribute zero pages
+      if (
+        item.status === "WANT_TO_READ"
+      ) {
+        return total;
+      }
+
+      // CURRENTLY_READING uses actual current page
+      return (
+        total +
+        Math.min(
+          currentPage,
+          totalPages || currentPage
+        )
+      );
     }, 0);
 
   const pagesAvailable =
     statsBooksWithPages.reduce(
       (total, item) =>
-        total + (Number(item.totalPages) || 0),
+        total +
+        (Number(item.totalPages) || 0),
       0
     );
 
@@ -1979,12 +2131,16 @@ function App() {
           title: "The First Page",
           text: "Your reading universe is waiting for its first story."
         }
-      : readCount >= currentlyReadingCount + wantToReadCount
+      : readCount >=
+        currentlyReadingCount +
+          wantToReadCount
       ? {
           title: "The Finisher",
           text: "You like seeing stories through to their final page."
         }
-      : wantToReadCount >= readCount + currentlyReadingCount
+      : wantToReadCount >=
+        readCount +
+          currentlyReadingCount
       ? {
           title: "The Curator",
           text: "Your shelves are full of stories waiting for the right moment."
@@ -2681,7 +2837,7 @@ function App() {
     </section>
   );
 
-// =========================================================
+  // =========================================================
   // CHARACTERS PAGE
   // =========================================================
 
@@ -2937,80 +3093,129 @@ function App() {
               <span className="eyebrow">
                 THE BIG PICTURE
               </span>
-              <h3>Your Reading Journey</h3>
+
+              <h3>
+                Your Reading Journey
+              </h3>
+
               <p>
                 Every page counts. Here is how far your collection has travelled.
               </p>
             </div>
-            <span className="reading-panel-symbol">◒</span>
+
+            <span className="reading-panel-symbol">
+              ◒
+            </span>
           </div>
 
           <div className="journey-orbit">
             <div className="journey-orbit-inner">
-              <strong>{overallProgress}%</strong>
-              <span>collection progress</span>
+              <strong>
+                {overallProgress}%
+              </strong>
+
+              <span>
+                collection progress
+              </span>
             </div>
           </div>
 
           <div className="journey-bar-wrap">
+
             <div className="journey-bar-labels">
-              <span>{pagesRead.toLocaleString()} pages read</span>
-              <span>{pagesAvailable.toLocaleString()} available</span>
+              <span>
+                {pagesRead.toLocaleString()} pages read
+              </span>
+
+              <span>
+                {pagesAvailable.toLocaleString()} available
+              </span>
             </div>
+
             <div className="journey-bar">
               <div
                 className="journey-bar-fill"
-                style={{ width: `${overallProgress}%` }}
+                style={{
+                  width: `${overallProgress}%`,
+                }}
               />
             </div>
+
           </div>
 
           <div className="journey-mini-grid">
+
             <div>
-              <span>Average book</span>
+              <span>
+                Average book
+              </span>
+
               <strong>
                 {averagePagesPerBook > 0
                   ? `${averagePagesPerBook} pages`
                   : "—"}
               </strong>
             </div>
+
             <div>
-              <span>Longest book</span>
+              <span>
+                Longest book
+              </span>
+
               <strong>
                 {longestBook
-                  ? `${Number(longestBook.totalPages).toLocaleString()} pages`
+                  ? `${Number(
+                      longestBook.totalPages
+                    ).toLocaleString()} pages`
                   : "—"}
               </strong>
             </div>
+
           </div>
         </article>
 
         <article className="reading-panel goal-panel">
+
           <div className="reading-panel-heading">
+
             <div>
               <span className="eyebrow">
                 THIS YEAR
               </span>
-              <h3>Reading Goal</h3>
+
+              <h3>
+                Reading Goal
+              </h3>
+
               <p>
                 A gentle target — not a race.
               </p>
             </div>
-            <span className="reading-panel-symbol">✦</span>
+
+            <span className="reading-panel-symbol">
+              ✦
+            </span>
+
           </div>
 
           <div className="goal-number">
-            <strong>{readCount}</strong>
-            <span>/ {readingGoal} books</span>
+            <strong>
+              {readCount}
+            </strong>
+
+            <span>
+              / {readingGoal} books
+            </span>
           </div>
 
           <div className="goal-bar">
             <div
               className="goal-bar-fill"
-              style={{ width: `${readingGoalProgress}%` }}
+              style={{
+                width: `${readingGoalProgress}%`,
+              }}
             />
           </div>
-
           <div className="goal-footer">
             <span>{readingGoalProgress}% complete</span>
             <span>
