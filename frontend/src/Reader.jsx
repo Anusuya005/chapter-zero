@@ -1,383 +1,645 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./Reader.css";
-import { apiFetch } from "./api";
+
+const API =
+  import.meta.env.VITE_API_URL ||
+  "http://localhost:8080";
 
 function Reader({ book, onClose }) {
+  const readerRef = useRef(null);
+  const saveTimerRef = useRef(null);
+
   const [chapters, setChapters] = useState([]);
   const [activeChapter, setActiveChapter] = useState(0);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [fontSize, setFontSize] = useState(18);
+  const [lineHeight, setLineHeight] = useState(1.8);
 
-  const [fontSize, setFontSize] = useState(19);
-  const [lineHeight, setLineHeight] = useState(1.85);
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("parchment");
   const [showControls, setShowControls] = useState(true);
-
-  const [bookmarks, setBookmarks] = useState([]);
   const [showContents, setShowContents] = useState(false);
 
-  const [chapterProgress, setChapterProgress] = useState(0);
+  const [bookmarks, setBookmarks] = useState([]);
+
+  const [progress, setProgress] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const [loading, setLoading] = useState(true);
   const [savingProgress, setSavingProgress] = useState(false);
 
-  const saveTimer = useRef(null);
+  /*
+   * ---------------------------------------------------------
+   * BOOK ID / USER BOOK ID
+   * ---------------------------------------------------------
+   */
 
-  const bookId = book?.book?.id;
-  const userBookId = book?.id;
+  const bookId =
+    book?.bookId ??
+    book?.book?.id ??
+    book?.id;
 
-  const storageKey = useMemo(
-    () => `chapterZeroReader_${bookId}`,
-    [bookId]
+  const userBookId =
+    book?.userBookId ??
+    book?.userBook?.id ??
+    book?.id;
+
+  /*
+   * ---------------------------------------------------------
+   * TOTAL PAGES
+   * ---------------------------------------------------------
+   *
+   * If the book already has a page count, use it.
+   * Otherwise use 300 as a sensible fallback.
+   */
+
+  const totalPages = Math.max(
+    1,
+    Number(
+      book?.totalPages ??
+        book?.book?.totalPages ??
+        book?.pageCount ??
+        300
+    )
   );
 
-  // =========================================================
-  // RESTORE READER STATE
-  // =========================================================
+  /*
+   * ---------------------------------------------------------
+   * LOCAL STORAGE KEY
+   * ---------------------------------------------------------
+   */
+
+  const storageKey = `chapterZeroReader_${bookId}`;
+
+  /*
+   * ---------------------------------------------------------
+   * LOAD CHAPTERS
+   * ---------------------------------------------------------
+   */
 
   useEffect(() => {
-    if (!bookId) return;
-
-    const saved = localStorage.getItem(storageKey);
-
-    if (!saved) return;
-
-    try {
-      const parsed = JSON.parse(saved);
-
-      if (typeof parsed.chapter === "number") {
-        setActiveChapter(parsed.chapter);
-      }
-
-      if (typeof parsed.fontSize === "number") {
-        setFontSize(parsed.fontSize);
-      }
-
-      if (typeof parsed.lineHeight === "number") {
-        setLineHeight(parsed.lineHeight);
-      }
-
-      if (parsed.theme) {
-        setTheme(parsed.theme);
-      }
-
-      if (Array.isArray(parsed.bookmarks)) {
-        setBookmarks(parsed.bookmarks);
-      }
-    } catch {
-      console.warn("Could not restore reader settings.");
+    if (!bookId) {
+      setLoading(false);
+      return;
     }
-  }, [bookId, storageKey]);
 
-  // =========================================================
-  // SAVE READER STATE
-  // =========================================================
+    let cancelled = false;
 
-  useEffect(() => {
-    if (!bookId) return;
-
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify({
-        chapter: activeChapter,
-        fontSize,
-        lineHeight,
-        theme,
-        bookmarks,
-      })
-    );
-  }, [
-    bookId,
-    storageKey,
-    activeChapter,
-    fontSize,
-    lineHeight,
-    theme,
-    bookmarks,
-  ]);
-
-  // =========================================================
-  // LOAD CHAPTERS
-  // =========================================================
-
-  useEffect(() => {
-    if (!bookId) return;
-
-    const loadChapters = async () => {
+    async function loadChapters() {
       try {
         setLoading(true);
-        setError("");
 
-        const response = await apiFetch(
-          `/api/book-chapters/book/${bookId}`
+        const response = await fetch(
+          `${API}/api/book-chapters/book/${bookId}`
         );
 
         if (!response.ok) {
-          throw new Error("Failed to load chapters");
+          throw new Error("Unable to load chapters");
         }
 
         const data = await response.json();
 
-        setChapters(data);
-
-        if (data.length === 0) {
-          setError(
-            "This book does not have readable content yet."
-          );
+        if (!cancelled) {
+          setChapters(Array.isArray(data) ? data : []);
         }
-      } catch (err) {
-        console.error(err);
+      } catch (error) {
+        console.error("Reader chapter error:", error);
 
-        setError(
-          "Unable to open this book right now."
-        );
+        if (!cancelled) {
+          setChapters([]);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    };
+    }
 
     loadChapters();
+
+    return () => {
+      cancelled = true;
+    };
   }, [bookId]);
 
-  // =========================================================
-  // CURRENT CHAPTER
-  // =========================================================
+  /*
+   * ---------------------------------------------------------
+   * RESTORE SAVED READING POSITION
+   * ---------------------------------------------------------
+   */
 
-  const currentChapter =
-    chapters[activeChapter];
-
-  // =========================================================
-  // BOOK PROGRESS
-  // =========================================================
-
-  const progress =
-    chapters.length === 0
-      ? 0
-      : (
-          (
-            activeChapter +
-            chapterProgress
-          ) /
-          chapters.length
-        ) * 100;
-
-  // =========================================================
-  // SAVE READING PROGRESS
-  // =========================================================
-
-  const saveReadingProgress = (
-    calculatedProgress
-  ) => {
-    if (!userBookId || chapters.length === 0) {
+  useEffect(() => {
+    if (loading || chapters.length === 0) {
       return;
     }
 
-    const totalPages =
-      chapters.length;
+    const saved = localStorage.getItem(storageKey);
 
-    let currentPage = Math.ceil(
-      calculatedProgress * totalPages
+    if (!saved) {
+      return;
+    }
+
+    try {
+      const data = JSON.parse(saved);
+
+      const savedChapter = Number(data.chapter);
+
+      if (
+        Number.isInteger(savedChapter) &&
+        savedChapter >= 0 &&
+        savedChapter < chapters.length
+      ) {
+        setActiveChapter(savedChapter);
+      }
+
+      if (typeof data.progress === "number") {
+        setProgress(
+          Math.min(
+            100,
+            Math.max(0, data.progress)
+          )
+        );
+      }
+
+      if (typeof data.currentPage === "number") {
+        setCurrentPage(
+          Math.min(
+            totalPages,
+            Math.max(1, Math.round(data.currentPage))
+          )
+        );
+      }
+
+      /*
+       * Wait for the chapter to render before restoring
+       * the exact scroll position.
+       */
+
+      setTimeout(() => {
+        const container = readerRef.current;
+
+        if (!container) {
+          return;
+        }
+
+        if (typeof data.chapterScroll === "number") {
+          const maxScroll =
+            container.scrollHeight -
+            container.clientHeight;
+
+          container.scrollTop =
+            maxScroll > 0
+              ? maxScroll * data.chapterScroll
+              : 0;
+        }
+      }, 150);
+    } catch (error) {
+      console.error(
+        "Could not restore reading position:",
+        error
+      );
+    }
+  }, [
+    loading,
+    chapters.length,
+    storageKey,
+    totalPages,
+  ]);
+
+  /*
+   * ---------------------------------------------------------
+   * SAVE POSITION LOCALLY
+   * ---------------------------------------------------------
+   */
+
+  function saveLocalPosition(
+    nextProgress = progress,
+    nextPage = currentPage,
+    nextChapter = activeChapter
+  ) {
+    const container = readerRef.current;
+
+    let chapterScroll = 0;
+
+    if (container) {
+      const maxScroll =
+        container.scrollHeight -
+        container.clientHeight;
+
+      if (maxScroll > 0) {
+        chapterScroll =
+          container.scrollTop / maxScroll;
+      }
+    }
+
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        chapter: nextChapter,
+        progress: nextProgress,
+        currentPage: nextPage,
+        chapterScroll,
+      })
+    );
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * SAVE PROGRESS TO BACKEND
+   * ---------------------------------------------------------
+   *
+   * This is attempted automatically.
+   *
+   * If the backend is unavailable, localStorage still keeps
+   * the reading position.
+   */
+
+  async function saveBackendProgress(
+    nextPage
+  ) {
+    if (!userBookId) {
+      return;
+    }
+
+    try {
+      setSavingProgress(true);
+
+      const token =
+        localStorage.getItem(
+          "chapterZeroToken"
+        );
+
+      const headers = {};
+
+      if (token) {
+        headers.Authorization =
+          `Bearer ${token}`;
+      }
+
+      await fetch(
+        `${API}/api/user-books/${userBookId}/progress?currentPage=${Math.round(
+          nextPage
+        )}&totalPages=${totalPages}`,
+        {
+          method: "PUT",
+          headers,
+        }
+      );
+    } catch (error) {
+      console.error(
+        "Could not save backend progress:",
+        error
+      );
+    } finally {
+      setSavingProgress(false);
+    }
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * CALCULATE BOOK PROGRESS FROM SCROLL POSITION
+   * ---------------------------------------------------------
+   *
+   * This is the important part.
+   *
+   * Instead of manually entering pages:
+   *
+   * chapter position + scroll position
+   *              ↓
+   *       overall percentage
+   *              ↓
+   *       approximate page
+   */
+
+  function calculateProgress() {
+    if (!readerRef.current || chapters.length === 0) {
+      return;
+    }
+
+    const container = readerRef.current;
+
+    const maxScroll =
+      container.scrollHeight -
+      container.clientHeight;
+
+    let chapterScroll = 0;
+
+    if (maxScroll > 0) {
+      chapterScroll =
+        container.scrollTop / maxScroll;
+    }
+
+    chapterScroll = Math.min(
+      1,
+      Math.max(0, chapterScroll)
     );
 
-    currentPage = Math.max(
-      1,
-      Math.min(
-        currentPage,
-        totalPages
+    /*
+     * Each chapter gets an equal portion of the book.
+     */
+
+    const chapterProgress =
+      (activeChapter + chapterScroll) /
+      chapters.length;
+
+    const nextProgress = Math.min(
+      100,
+      Math.max(
+        0,
+        chapterProgress * 100
       )
     );
 
-    setSavingProgress(true);
+    /*
+     * Convert percentage into approximate page.
+     */
 
-    clearTimeout(saveTimer.current);
-
-    saveTimer.current = setTimeout(
-      async () => {
-        try {
-          const response = await apiFetch(
-            `/api/user-books/${userBookId}/progress?currentPage=${currentPage}&totalPages=${totalPages}`,
-            {
-              method: "PUT",
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error(
-              "Could not save reading progress"
-            );
-          }
-        } catch (error) {
-          console.error(
-            "Progress save failed:",
-            error
-          );
-        } finally {
-          setSavingProgress(false);
-        }
-      },
-      700
+    const nextPage = Math.min(
+      totalPages,
+      Math.max(
+        1,
+        Math.round(
+          (nextProgress / 100) *
+            totalPages
+        )
+      )
     );
-  };
 
-  // =========================================================
-  // TRACK SCROLL POSITION
-  // =========================================================
+    setProgress(nextProgress);
+    setCurrentPage(nextPage);
+
+    /*
+     * Save locally immediately.
+     */
+
+    saveLocalPosition(
+      nextProgress,
+      nextPage,
+      activeChapter
+    );
+
+    /*
+     * Don't hit the backend on every tiny scroll.
+     * Wait until scrolling settles.
+     */
+
+    clearTimeout(saveTimerRef.current);
+
+    saveTimerRef.current =
+      setTimeout(() => {
+        saveBackendProgress(nextPage);
+      }, 1000);
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * SCROLL LISTENER
+   * ---------------------------------------------------------
+   */
 
   useEffect(() => {
-    if (!currentChapter) return;
+    const container = readerRef.current;
 
-    const readerShell =
-      document.querySelector(
-        ".reader-shell"
-      );
+    if (!container) {
+      return;
+    }
 
-    if (!readerShell) return;
+    function handleScroll() {
+      calculateProgress();
+    }
 
-    const handleScroll = () => {
-      const scrollTop =
-        readerShell.scrollTop;
-
-      const viewportHeight =
-        readerShell.clientHeight;
-
-      const documentHeight =
-        readerShell.scrollHeight;
-
-      const scrollableHeight =
-        documentHeight -
-        viewportHeight;
-
-      if (scrollableHeight <= 0) {
-        setChapterProgress(1);
-        return;
-      }
-
-      const percentage =
-        Math.min(
-          1,
-          Math.max(
-            0,
-            scrollTop /
-              scrollableHeight
-          )
-        );
-
-      setChapterProgress(
-        percentage
-      );
-
-      const overallProgress =
-        (
-          activeChapter +
-          percentage
-        ) /
-        Math.max(
-          chapters.length,
-          1
-        );
-
-      saveReadingProgress(
-        overallProgress
-      );
-    };
-
-    readerShell.addEventListener(
+    container.addEventListener(
       "scroll",
       handleScroll,
       { passive: true }
     );
 
-    handleScroll();
-
     return () => {
-      readerShell.removeEventListener(
+      container.removeEventListener(
         "scroll",
         handleScroll
-      );
-
-      clearTimeout(
-        saveTimer.current
       );
     };
   }, [
     activeChapter,
-    currentChapter,
     chapters.length,
+    totalPages,
     userBookId,
   ]);
 
-  // =========================================================
-  // SCROLL READER TO TOP
-  // =========================================================
-
-  const scrollReaderToTop = () => {
-    const readerShell =
-      document.querySelector(
-        ".reader-shell"
-      );
-
-    if (!readerShell) return;
-
-    readerShell.scrollTo({
-      top: 0,
-      behavior: "instant",
-    });
-  };
-
-  // =========================================================
-  // KEYBOARD CONTROLS
-  // =========================================================
+  /*
+   * ---------------------------------------------------------
+   * CLEANUP
+   * ---------------------------------------------------------
+   */
 
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        onClose();
-        return;
+    return () => {
+      clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  /*
+   * ---------------------------------------------------------
+   * CHANGE CHAPTER
+   * ---------------------------------------------------------
+   */
+
+  function openChapter(index) {
+    if (
+      index < 0 ||
+      index >= chapters.length
+    ) {
+      return;
+    }
+
+    /*
+     * Save current position before leaving chapter.
+     */
+
+    calculateProgress();
+
+    setActiveChapter(index);
+
+    setTimeout(() => {
+      if (readerRef.current) {
+        readerRef.current.scrollTop = 0;
       }
+
+      /*
+       * Recalculate progress after chapter change.
+       */
+
+      const nextProgress =
+        (index / chapters.length) * 100;
+
+      const nextPage = Math.max(
+        1,
+        Math.round(
+          (nextProgress / 100) *
+            totalPages
+        )
+      );
+
+      setProgress(nextProgress);
+      setCurrentPage(nextPage);
+
+      saveLocalPosition(
+        nextProgress,
+        nextPage,
+        index
+      );
+
+      saveBackendProgress(nextPage);
+    }, 50);
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * NEXT / PREVIOUS
+   * ---------------------------------------------------------
+   */
+
+  function goNext() {
+    if (
+      activeChapter <
+      chapters.length - 1
+    ) {
+      openChapter(
+        activeChapter + 1
+      );
+    } else {
+      /*
+       * Final chapter = 100%.
+       */
+
+      setProgress(100);
+      setCurrentPage(totalPages);
+
+      saveLocalPosition(
+        100,
+        totalPages,
+        activeChapter
+      );
+
+      saveBackendProgress(totalPages);
+    }
+  }
+
+  function goPrevious() {
+    if (activeChapter > 0) {
+      openChapter(
+        activeChapter - 1
+      );
+    }
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * BOOKMARKS
+   * ---------------------------------------------------------
+   */
+
+  function toggleBookmark() {
+    const bookmark = {
+      chapter: activeChapter,
+      title:
+        chapters[activeChapter]?.title ||
+        `Chapter ${activeChapter + 1}`,
+      progress: progress,
+    };
+
+    setBookmarks((current) => {
+      const exists = current.some(
+        (item) =>
+          item.chapter ===
+          activeChapter
+      );
+
+      const updated = exists
+        ? current.filter(
+            (item) =>
+              item.chapter !==
+              activeChapter
+          )
+        : [...current, bookmark];
+
+      localStorage.setItem(
+        `${storageKey}_bookmarks`,
+        JSON.stringify(updated)
+      );
+
+      return updated;
+    });
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * LOAD BOOKMARKS
+   * ---------------------------------------------------------
+   */
+
+  useEffect(() => {
+    const saved =
+      localStorage.getItem(
+        `${storageKey}_bookmarks`
+      );
+
+    if (!saved) {
+      return;
+    }
+
+    try {
+      const data = JSON.parse(saved);
+
+      if (Array.isArray(data)) {
+        setBookmarks(data);
+      }
+    } catch (error) {
+      console.error(
+        "Could not load bookmarks:",
+        error
+      );
+    }
+  }, [storageKey]);
+
+  /*
+   * ---------------------------------------------------------
+   * KEYBOARD SHORTCUTS
+   * ---------------------------------------------------------
+   */
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      const tag =
+        event.target?.tagName;
 
       if (
-        event.key === "f" ||
-        event.key === "F"
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT"
       ) {
-        setShowControls(
-          (previous) => !previous
-        );
-        return;
-      }
-
-      if (event.key === "ArrowLeft") {
-        goPrevious();
         return;
       }
 
       if (event.key === "ArrowRight") {
         goNext();
-        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        goPrevious();
+      }
+
+      if (event.key === "Escape") {
+        onClose();
       }
 
       if (
-        event.key === "+" ||
-        event.key === "="
+        event.key === "b" ||
+        event.key === "B"
       ) {
-        setFontSize(
-          (previous) =>
-            Math.min(
-              previous + 1,
-              30
-            )
-        );
-        return;
+        toggleBookmark();
       }
-
-      if (event.key === "-") {
-        setFontSize(
-          (previous) =>
-            Math.max(
-              previous - 1,
-              13
-            )
-        );
-      }
-    };
+    }
 
     window.addEventListener(
       "keydown",
@@ -390,643 +652,480 @@ function Reader({ book, onClose }) {
         handleKeyDown
       );
     };
-  });
+  }, [
+    activeChapter,
+    progress,
+    chapters.length,
+  ]);
 
-  // =========================================================
-  // GO PREVIOUS
-  // =========================================================
+  /*
+   * ---------------------------------------------------------
+   * READING STYLES
+   * ---------------------------------------------------------
+   */
 
-  const goPrevious = () => {
-    if (activeChapter === 0) {
-      return;
-    }
+  const readerStyle = useMemo(
+    () => ({
+      fontSize: `${fontSize}px`,
+      lineHeight: lineHeight,
+    }),
+    [fontSize, lineHeight]
+  );
 
-    setActiveChapter(
-      (previous) =>
-        Math.max(
-          previous - 1,
-          0
-        )
+  /*
+   * ---------------------------------------------------------
+   * CURRENT CHAPTER
+   * ---------------------------------------------------------
+   */
+
+  const currentChapter =
+    chapters[activeChapter];
+
+  /*
+   * ---------------------------------------------------------
+   * LOADING
+   * ---------------------------------------------------------
+   */
+
+  if (loading) {
+    return (
+      <div className="reader-overlay">
+        <div className="reader-loading">
+          <div className="reader-loading-symbol">
+            ✦
+          </div>
+
+          <h2>Opening your book…</h2>
+
+          <p>
+            Preparing your reading space.
+          </p>
+        </div>
+      </div>
     );
+  }
 
-    setChapterProgress(0);
+  /*
+   * ---------------------------------------------------------
+   * NO CHAPTERS
+   * ---------------------------------------------------------
+   */
 
-    setTimeout(() => {
-      scrollReaderToTop();
-    }, 0);
-  };
+  if (chapters.length === 0) {
+    return (
+      <div className="reader-overlay">
+        <div className="reader-empty">
+          <div className="reader-empty-symbol">
+            ◌
+          </div>
 
-  // =========================================================
-  // GO NEXT
-  // =========================================================
+          <h2>
+            This book isn't ready to read yet.
+          </h2>
 
-  const goNext = () => {
-    if (
-      activeChapter >=
-      chapters.length - 1
-    ) {
-      return;
-    }
+          <p>
+            Chapters haven't been added to
+            this book yet.
+          </p>
 
-    setActiveChapter(
-      (previous) =>
-        Math.min(
-          previous + 1,
-          Math.max(
-            chapters.length - 1,
-            0
-          )
-        )
+          <button
+            className="reader-close-button"
+            onClick={onClose}
+          >
+            Close Reader
+          </button>
+        </div>
+      </div>
     );
+  }
 
-    setChapterProgress(0);
-
-    setTimeout(() => {
-      scrollReaderToTop();
-    }, 0);
-  };
-
-  // =========================================================
-  // SELECT CHAPTER
-  // =========================================================
-
-  const selectChapter = (
-    index
-  ) => {
-    setActiveChapter(index);
-    setChapterProgress(0);
-    setShowContents(false);
-
-    setTimeout(() => {
-      scrollReaderToTop();
-    }, 0);
-  };
-
-  // =========================================================
-  // BOOKMARK
-  // =========================================================
-
-  const toggleBookmark = () => {
-    if (!currentChapter) return;
-
-    const chapterNumber =
-      currentChapter.chapterNumber;
-
-    setBookmarks(
-      (previous) => {
-        if (
-          previous.includes(
-            chapterNumber
-          )
-        ) {
-          return previous.filter(
-            (number) =>
-              number !==
-              chapterNumber
-          );
-        }
-
-        return [
-          ...previous,
-          chapterNumber,
-        ];
-      }
-    );
-  };
-
-  const isBookmarked =
-    currentChapter &&
-    bookmarks.includes(
-      currentChapter.chapterNumber
-    );
-
-  // =========================================================
-  // READER THEME
-  // =========================================================
-
-  const readerClass =
-    theme === "light"
-      ? "reader-shell reader-light"
-      : theme === "sepia"
-        ? "reader-shell reader-sepia"
-        : "reader-shell reader-dark";
-
-  // =========================================================
-  // RENDER
-  // =========================================================
+  /*
+   * ---------------------------------------------------------
+   * RENDER
+   * ---------------------------------------------------------
+   */
 
   return (
-    <div className={readerClass}>
-
+    <div
+      className={`reader-overlay reader-theme-${theme}`}
+    >
       {/* =====================================================
           TOP BAR
-      ===================================================== */}
+      ====================================================== */}
 
       {showControls && (
         <header className="reader-topbar">
+          <div className="reader-book-info">
+            <button
+              className="reader-icon-button"
+              onClick={onClose}
+              title="Close reader"
+            >
+              ←
+            </button>
 
-          <button
-            className="reader-back-button"
-            onClick={onClose}
-          >
-            ← Library
-          </button>
+            <div>
+              <h2>
+                {book?.title ||
+                  book?.book?.title ||
+                  "Untitled Book"}
+              </h2>
 
-          <div className="reader-title-area">
-
-            <span className="reader-chapter-label">
-              CHAPTER ZERO · READING ROOM
-            </span>
-
-            <h1>
-              {book?.book?.title ||
-                "Untitled Book"}
-            </h1>
-
-            <p>
-              {book?.book?.author ||
-                "Unknown Author"}
-            </p>
-
+              <span>
+                {book?.author ||
+                  book?.book?.author ||
+                  "Unknown Author"}
+              </span>
+            </div>
           </div>
 
           <div className="reader-top-actions">
-
             <button
               className="reader-icon-button"
-              title="Table of contents"
               onClick={() =>
                 setShowContents(
-                  (previous) =>
-                    !previous
+                  !showContents
                 )
               }
+              title="Table of contents"
             >
               ☰
             </button>
 
             <button
-              className="reader-icon-button"
-              title="Decrease font size"
-              onClick={() =>
-                setFontSize(
-                  (previous) =>
-                    Math.max(
-                      previous - 1,
-                      13
-                    )
+              className={`reader-icon-button ${
+                bookmarks.some(
+                  (item) =>
+                    item.chapter ===
+                    activeChapter
                 )
-              }
+                  ? "active"
+                  : ""
+              }`}
+              onClick={toggleBookmark}
+              title="Bookmark"
             >
-              A−
+              🔖
             </button>
-
-            <span className="reader-font-size">
-              {fontSize}px
-            </span>
 
             <button
               className="reader-icon-button"
-              title="Increase font size"
               onClick={() =>
-                setFontSize(
-                  (previous) =>
-                    Math.min(
-                      previous + 1,
-                      30
-                    )
-                )
+                setShowControls(false)
               }
+              title="Hide controls"
             >
-              A+
+              ×
             </button>
-
-            <button
-              className="reader-icon-button"
-              title="Change theme"
-              onClick={() => {
-                setTheme(
-                  (previous) => {
-                    if (
-                      previous ===
-                      "dark"
-                    ) {
-                      return "sepia";
-                    }
-
-                    if (
-                      previous ===
-                      "sepia"
-                    ) {
-                      return "light";
-                    }
-
-                    return "dark";
-                  }
-                );
-              }}
-            >
-              ◐
-            </button>
-
-            <button
-              className="reader-icon-button"
-              title="Line spacing"
-              onClick={() =>
-                setLineHeight(
-                  (previous) =>
-                    previous >= 2.2
-                      ? 1.6
-                      : Number(
-                          (
-                            previous +
-                            0.2
-                          ).toFixed(1)
-                        )
-                )
-              }
-            >
-              ↕
-            </button>
-
-            <button
-              className="reader-icon-button"
-              title="Bookmark chapter"
-              onClick={
-                toggleBookmark
-              }
-            >
-              {isBookmarked
-                ? "★"
-                : "☆"}
-            </button>
-
           </div>
-
         </header>
       )}
 
       {/* =====================================================
           PROGRESS BAR
-      ===================================================== */}
+      ====================================================== */}
 
       <div className="reader-progress-track">
-
         <div
           className="reader-progress-fill"
           style={{
             width: `${progress}%`,
           }}
         />
-
       </div>
 
       {/* =====================================================
           TABLE OF CONTENTS
-      ===================================================== */}
+      ====================================================== */}
 
-      {showContents &&
-        showControls &&
-        chapters.length > 0 && (
-
-          <aside className="reader-contents-panel">
-
-            <div className="reader-contents-header">
-
-              <span>
-                TABLE OF CONTENTS
-              </span>
-
-              <button
-                onClick={() =>
-                  setShowContents(false)
-                }
-              >
-                ×
-              </button>
-
-            </div>
-
-            <div className="reader-contents-list">
-
-              {chapters.map(
-                (
-                  chapter,
-                  index
-                ) => (
-
-                  <button
-                    key={chapter.id}
-                    className={
-                      index ===
-                      activeChapter
-                        ? "reader-content-item active"
-                        : "reader-content-item"
-                    }
-                    onClick={() =>
-                      selectChapter(
-                        index
-                      )
-                    }
-                  >
-
-                    <span>
-                      {String(
-                        chapter.chapterNumber
-                      ).padStart(
-                        2,
-                        "0"
-                      )}
-                    </span>
-
-                    <strong>
-                      {chapter.title}
-                    </strong>
-
-                    {bookmarks.includes(
-                      chapter.chapterNumber
-                    ) && (
-                      <em>
-                        ★
-                      </em>
-                    )}
-
-                  </button>
-
-                )
-              )}
-
-            </div>
-
-          </aside>
-
-        )}
-
-      {/* =====================================================
-          MAIN READING AREA
-      ===================================================== */}
-
-      <main className="reader-main">
-
-        {loading ? (
-
-          <section className="reader-welcome">
-
-            <div className="reader-moon">
-              ☾
-            </div>
-
-            <span className="reader-eyebrow">
-              OPENING YOUR BOOK
-            </span>
-
-            <h2>
-              Turning the page...
-            </h2>
-
-            <p>
-              Chapter Zero is preparing
-              your reading room.
-            </p>
-
-          </section>
-
-        ) : error ? (
-
-          <section className="reader-welcome">
-
-            <div className="reader-moon">
-              ✦
-            </div>
-
-            <span className="reader-eyebrow">
-              READING ROOM
-            </span>
-
-            <h2>
-              Nothing to read yet.
-            </h2>
-
-            <p>
-              Add chapters to this book
-              and they will appear here.
-            </p>
+      {showContents && (
+        <aside className="reader-contents">
+          <div className="reader-contents-header">
+            <h3>Contents</h3>
 
             <button
-              className="reader-open-button"
-              onClick={onClose}
+              onClick={() =>
+                setShowContents(false)
+              }
             >
-              Return to Library
+              ×
+            </button>
+          </div>
+
+          <div className="reader-chapter-list">
+            {chapters.map(
+              (chapter, index) => (
+                <button
+                  key={
+                    chapter.id ??
+                    index
+                  }
+                  className={
+                    index === activeChapter
+                      ? "active"
+                      : ""
+                  }
+                  onClick={() => {
+                    openChapter(index);
+                    setShowContents(false);
+                  }}
+                >
+                  <span>
+                    {index + 1}
+                  </span>
+
+                  <strong>
+                    {chapter.title ||
+                      `Chapter ${
+                        index + 1
+                      }`}
+                  </strong>
+                </button>
+              )
+            )}
+          </div>
+        </aside>
+      )}
+
+      {/* =====================================================
+          READER
+      ====================================================== */}
+
+      <main
+        ref={readerRef}
+        className="reader-shell"
+      >
+        <article
+          className="reader-page"
+          style={readerStyle}
+        >
+          <div className="reader-chapter-heading">
+            <span>
+              Chapter {activeChapter + 1}
+            </span>
+
+            <h1>
+              {currentChapter?.title ||
+                `Chapter ${
+                  activeChapter + 1
+                }`}
+            </h1>
+          </div>
+
+          <div className="reader-content">
+            {currentChapter?.content
+              ?.split("\n")
+              .map((paragraph, index) => {
+                if (
+                  !paragraph.trim()
+                ) {
+                  return (
+                    <div
+                      key={index}
+                      className="reader-paragraph-space"
+                    />
+                  );
+                }
+
+                return (
+                  <p key={index}>
+                    {paragraph}
+                  </p>
+                );
+              })}
+          </div>
+
+          {/* =================================================
+              CHAPTER NAVIGATION
+          ================================================== */}
+
+          <div className="reader-chapter-navigation">
+            <button
+              disabled={
+                activeChapter === 0
+              }
+              onClick={goPrevious}
+            >
+              ← Previous
             </button>
 
-          </section>
-
-        ) : (
-
-          <article className="reader-page">
-
-            {/* CHAPTER HEADER */}
-
-            <div className="reader-page-header">
-
+            <div className="reader-chapter-status">
               <span>
-                CHAPTER{" "}
-                {
-                  currentChapter?.chapterNumber
-                }
-              </span>
-
-              <span>
-                {activeChapter + 1}
-                {" / "}
+                Chapter{" "}
+                {activeChapter + 1} of{" "}
                 {chapters.length}
               </span>
 
+              <strong>
+                {Math.round(progress)}%
+              </strong>
             </div>
 
-            {/* CHAPTER TITLE */}
-
-            <h2 className="reader-chapter-title">
-              {currentChapter?.title}
-            </h2>
-
-            {/* BOOK TEXT */}
-
-            <div
-              className="reader-book-text"
-              style={{
-                fontSize:
-                  `${fontSize}px`,
-                lineHeight,
-              }}
+            <button
+              onClick={goNext}
             >
-
-              {currentChapter?.content
-                ?.split(/\n\s*\n/)
-                .map(
-                  (
-                    paragraph,
-                    index
-                  ) => (
-
-                    <p key={index}>
-                      {paragraph.trim()}
-                    </p>
-
-                  )
-                )}
-
-            </div>
-
-            {/* CHAPTER END */}
-
-            <div className="reader-chapter-end">
-
-              <span>
-                ✦
-              </span>
-
-            </div>
-
-            {/* NAVIGATION */}
-
-            <div className="reader-page-navigation">
-
-              <button
-                className="reader-navigation-button"
-                disabled={
-                  activeChapter ===
-                  0
-                }
-                onClick={
-                  goPrevious
-                }
-              >
-                ← Previous
-              </button>
-
-              <div className="reader-page-progress">
-
-                <span>
-                  {Math.round(
-                    progress
-                  )}
-                  %
-                </span>
-
-                <small>
-                  BOOK PROGRESS
-                </small>
-
-              </div>
-
-              <button
-                className="reader-navigation-button"
-                disabled={
-                  activeChapter ===
-                  chapters.length - 1
-                }
-                onClick={
-                  goNext
-                }
-              >
-                Next →
-              </button>
-
-            </div>
-
-          </article>
-
-        )}
-
+              {activeChapter ===
+              chapters.length - 1
+                ? "Finish Book"
+                : "Next →"}
+            </button>
+          </div>
+        </article>
       </main>
 
       {/* =====================================================
-          BOTTOM BAR
-      ===================================================== */}
+          BOTTOM CONTROLS
+      ====================================================== */}
 
-      {showControls &&
-        chapters.length > 0 && (
+      {showControls && (
+        <footer className="reader-bottom-bar">
+          <div className="reader-reading-progress">
+            <strong>
+              Page {currentPage}
+            </strong>
 
-          <footer className="reader-bottombar">
+            <span>
+              of {totalPages}
+            </span>
 
-            <div className="reader-book-info">
-
-              <span className="reader-small-label">
-                READING
-              </span>
-
-              <span className="reader-file-name">
-                {currentChapter?.title}
-              </span>
-
+            <div className="reader-mini-progress">
+              <div
+                style={{
+                  width: `${progress}%`,
+                }}
+              />
             </div>
 
-            <div className="reader-session">
+            <span>
+              {Math.round(progress)}%
+            </span>
 
-              <span>
-                Chapter{" "}
-                {activeChapter + 1}
-              </span>
+            {savingProgress && (
+              <small>
+                Saving…
+              </small>
+            )}
+          </div>
 
-              <span>
-                •
-              </span>
+          <div className="reader-controls">
+            <button
+              onClick={() =>
+                setFontSize(
+                  Math.max(
+                    14,
+                    fontSize - 1
+                  )
+                )
+              }
+              title="Decrease font size"
+            >
+              A−
+            </button>
 
-              <span>
-                {Math.round(
-                  progress
-                )}
-                %
-              </span>
+            <button
+              onClick={() =>
+                setFontSize(
+                  Math.min(
+                    30,
+                    fontSize + 1
+                  )
+                )
+              }
+              title="Increase font size"
+            >
+              A+
+            </button>
 
-              {savingProgress && (
-                <span
-                  style={{
-                    opacity: 0.45,
-                  }}
-                >
-                  Saving...
-                </span>
-              )}
+            <button
+              onClick={() =>
+                setLineHeight(
+                  Math.max(
+                    1.4,
+                    Number(
+                      (
+                        lineHeight -
+                        0.1
+                      ).toFixed(1)
+                    )
+                  )
+                )
+              }
+              title="Decrease line spacing"
+            >
+              ↕−
+            </button>
 
-            </div>
+            <button
+              onClick={() =>
+                setLineHeight(
+                  Math.min(
+                    2.4,
+                    Number(
+                      (
+                        lineHeight +
+                        0.1
+                      ).toFixed(1)
+                    )
+                  )
+                )
+              }
+              title="Increase line spacing"
+            >
+              ↕+
+            </button>
 
-            <div className="reader-hint">
+            <button
+              className={
+                theme === "light"
+                  ? "active"
+                  : ""
+              }
+              onClick={() =>
+                setTheme("light")
+              }
+            >
+              ☀
+            </button>
 
-              <kbd>←</kbd>
-              <kbd>→</kbd>
-              {" "}
-              chapters
-              &nbsp;·&nbsp;
-              <kbd>F</kbd>
-              {" "}
-              controls
+            <button
+              className={
+                theme === "parchment"
+                  ? "active"
+                  : ""
+              }
+              onClick={() =>
+                setTheme("parchment")
+              }
+            >
+              📜
+            </button>
 
-            </div>
-
-          </footer>
-
-        )}
-
-      {/* =====================================================
-          SHOW CONTROLS
-      ===================================================== */}
+            <button
+              className={
+                theme === "dark"
+                  ? "active"
+                  : ""
+              }
+              onClick={() =>
+                setTheme("dark")
+              }
+            >
+              ◐
+            </button>
+          </div>
+        </footer>
+      )}
 
       {!showControls && (
-
         <button
           className="reader-show-controls"
           onClick={() =>
             setShowControls(true)
           }
-          title="Show controls"
         >
-          ☰
+          ⚙
         </button>
-
       )}
-
     </div>
   );
 }
