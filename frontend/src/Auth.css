@@ -1,0 +1,599 @@
+/* =========================================================
+   CHAPTER ZERO — AUTHENTICATION
+   ========================================================= */
+
+.auth-page {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+
+  min-height: 100vh;
+  width: 100vw;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow-y: auto;
+
+  background:
+    radial-gradient(
+      circle at 20% 20%,
+      rgba(113, 87, 151, 0.16),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 80% 80%,
+      rgba(151, 113, 73, 0.12),
+      transparent 32%
+    ),
+    #100e13;
+
+  color: #eee8dc;
+
+  font-family:
+    Georgia,
+    "Times New Roman",
+    serif;
+}
+
+/* =========================================================
+   DECORATIVE STARS
+   ========================================================= */
+
+.auth-stars {
+  position: fixed;
+  inset: 0;
+
+  pointer-events: none;
+
+  overflow: hidden;
+
+  color: rgba(238, 232, 220, 0.22);
+
+  font-family: Georgia, serif;
+}
+
+.auth-stars span {
+  position: absolute;
+
+  animation:
+    authFloat 5s ease-in-out infinite;
+}
+
+.auth-stars span:nth-child(1) {
+  top: 14%;
+  left: 17%;
+  font-size: 20px;
+}
+
+.auth-stars span:nth-child(2) {
+  top: 25%;
+  right: 19%;
+  font-size: 16px;
+  animation-delay: 1s;
+}
+
+.auth-stars span:nth-child(3) {
+  bottom: 18%;
+  left: 23%;
+  font-size: 13px;
+  animation-delay: 2s;
+}
+
+.auth-stars span:nth-child(4) {
+  top: 61%;
+  right: 11%;
+  font-size: 28px;
+  animation-delay: 0.5s;
+}
+
+.auth-stars span:nth-child(5) {
+  bottom: 25%;
+  right: 28%;
+  font-size: 15px;
+  animation-delay: 1.5s;
+}
+
+.auth-stars span:nth-child(6) {
+  top: 11%;
+  right: 39%;
+  font-size: 11px;
+  animation-delay: 2.5s;
+}
+
+@keyframes authFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+
+  50% {
+    transform: translateY(-9px);
+    opacity: 0.75;
+  }
+}
+
+/* =========================================================
+   BACKGROUND GLOWS
+   ========================================================= */
+
+.auth-glow {
+  position: fixed;
+
+  width: 420px;
+  height: 420px;
+
+  border-radius: 50%;
+
+  filter: blur(100px);
+
+  pointer-events: none;
+}
+
+.auth-glow-one {
+  top: -220px;
+  left: -160px;
+
+  background:
+    rgba(102, 78, 137, 0.12);
+}
+
+.auth-glow-two {
+  bottom: -220px;
+  right: -160px;
+
+  background:
+    rgba(151, 113, 73, 0.10);
+}
+
+/* =========================================================
+   CARD
+   ========================================================= */
+
+.auth-card {
+  position: relative;
+
+  width: min(
+    440px,
+    calc(100vw - 40px)
+  );
+
+  margin: 40px 0;
+
+  padding: 48px 46px 34px;
+
+  border:
+    1px solid
+    rgba(220, 204, 178, 0.14);
+
+  border-radius: 18px;
+
+  background:
+    linear-gradient(
+      145deg,
+      rgba(34, 30, 40, 0.96),
+      rgba(22, 20, 27, 0.98)
+    );
+
+  box-shadow:
+    0 30px 90px
+      rgba(0, 0, 0, 0.48),
+    inset 0 1px 0
+      rgba(255, 255, 255, 0.035);
+
+  backdrop-filter: blur(20px);
+}
+
+/* =========================================================
+   BRAND
+   ========================================================= */
+
+.auth-brand {
+  text-align: center;
+
+  margin-bottom: 34px;
+}
+
+.auth-symbol {
+  width: 52px;
+  height: 52px;
+
+  margin: 0 auto 18px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border:
+    1px solid
+    rgba(205, 181, 144, 0.30);
+
+  border-radius: 50%;
+
+  color: #d9bd91;
+
+  font-size: 21px;
+
+  box-shadow:
+    0 0 30px
+      rgba(205, 181, 144, 0.08);
+}
+
+.auth-eyebrow {
+  display: block;
+
+  margin-bottom: 12px;
+
+  color:
+    rgba(211, 192, 162, 0.70);
+
+  font-family:
+    "Trebuchet MS",
+    Arial,
+    sans-serif;
+
+  font-size: 10px;
+
+  font-weight: 700;
+
+  letter-spacing: 3px;
+}
+
+.auth-brand h1 {
+  margin: 0;
+
+  color: #f2eadc;
+
+  font-size: 34px;
+
+  font-weight: 400;
+
+  line-height: 1.15;
+
+  letter-spacing: -0.5px;
+}
+
+.auth-brand p {
+  margin: 12px 0 0;
+
+  color:
+    rgba(238, 232, 220, 0.52);
+
+  font-family:
+    "Trebuchet MS",
+    Arial,
+    sans-serif;
+
+  font-size: 13px;
+
+  line-height: 1.6;
+}
+
+/* =========================================================
+   FORM
+   ========================================================= */
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+
+  gap: 19px;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+
+  gap: 8px;
+}
+
+.auth-field label {
+  color:
+    rgba(238, 232, 220, 0.72);
+
+  font-family:
+    "Trebuchet MS",
+    Arial,
+    sans-serif;
+
+  font-size: 11px;
+
+  font-weight: 600;
+
+  letter-spacing: 0.8px;
+}
+
+.auth-field input {
+  width: 100%;
+
+  box-sizing: border-box;
+
+  padding: 14px 15px;
+
+  border:
+    1px solid
+    rgba(220, 204, 178, 0.13);
+
+  border-radius: 9px;
+
+  outline: none;
+
+  background:
+    rgba(255, 255, 255, 0.035);
+
+  color: #eee8dc;
+
+  font-family:
+    "Trebuchet MS",
+    Arial,
+    sans-serif;
+
+  font-size: 14px;
+
+  transition:
+    border 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.auth-field input::placeholder {
+  color:
+    rgba(238, 232, 220, 0.25);
+}
+
+.auth-field input:focus {
+  border-color:
+    rgba(205, 181, 144, 0.50);
+
+  background:
+    rgba(255, 255, 255, 0.055);
+
+  box-shadow:
+    0 0 0 3px
+      rgba(205, 181, 144, 0.06);
+}
+
+/* =========================================================
+   ERROR
+   ========================================================= */
+
+.auth-error {
+  display: flex;
+  align-items: center;
+
+  gap: 9px;
+
+  padding: 11px 13px;
+
+  border:
+    1px solid
+    rgba(180, 82, 82, 0.25);
+
+  border-radius: 8px;
+
+  background:
+    rgba(180, 82, 82, 0.08);
+
+  color:
+    #dca9a9;
+
+  font-family:
+    "Trebuchet MS",
+    Arial,
+    sans-serif;
+
+  font-size: 12px;
+
+  line-height: 1.5;
+}
+
+.auth-error span {
+  width: 18px;
+  height: 18px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  border:
+    1px solid
+    rgba(220, 169, 169, 0.35);
+
+  border-radius: 50%;
+
+  font-size: 11px;
+}
+
+/* =========================================================
+   SUBMIT
+   ========================================================= */
+
+.auth-submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  width: 100%;
+
+  margin-top: 5px;
+
+  padding: 14px 17px;
+
+  border: none;
+
+  border-radius: 9px;
+
+  cursor: pointer;
+
+  background:
+    linear-gradient(
+      135deg,
+      #c7aa7c,
+      #a7895e
+    );
+
+  color: #18141a;
+
+  font-family:
+    "Trebuchet MS",
+    Arial,
+    sans-serif;
+
+  font-size: 12px;
+
+  font-weight: 700;
+
+  letter-spacing: 0.3px;
+
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+.auth-submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+
+  filter: brightness(1.07);
+
+  box-shadow:
+    0 10px 30px
+      rgba(199, 170, 124, 0.16);
+}
+
+.auth-submit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.auth-submit:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.auth-submit span {
+  font-size: 17px;
+}
+
+/* =========================================================
+   SWITCH
+   ========================================================= */
+
+.auth-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 6px;
+
+  margin-top: 24px;
+
+  font-family:
+    "Trebuchet MS",
+    Arial,
+    sans-serif;
+
+  font-size: 11px;
+}
+
+.auth-switch span {
+  color:
+    rgba(238, 232, 220, 0.42);
+}
+
+.auth-switch button {
+  padding: 0;
+
+  border: none;
+
+  background: transparent;
+
+  color: #cdb58f;
+
+  cursor: pointer;
+
+  font-family: inherit;
+
+  font-size: inherit;
+
+  font-weight: 600;
+}
+
+.auth-switch button:hover {
+  color: #ead7b5;
+  text-decoration: underline;
+}
+
+/* =========================================================
+   FOOTER
+   ========================================================= */
+
+.auth-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: 11px;
+
+  margin-top: 31px;
+  padding-top: 23px;
+
+  border-top:
+    1px solid
+    rgba(220, 204, 178, 0.08);
+}
+
+.auth-footer span {
+  color:
+    rgba(205, 181, 144, 0.35);
+
+  font-size: 8px;
+}
+
+.auth-footer p {
+  max-width: 210px;
+
+  margin: 0;
+
+  color:
+    rgba(238, 232, 220, 0.30);
+
+  text-align: center;
+
+  font-family:
+    Georgia,
+    serif;
+
+  font-size: 10px;
+
+  font-style: italic;
+
+  line-height: 1.5;
+}
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media (max-width: 600px) {
+
+  .auth-card {
+    width: calc(100vw - 28px);
+
+    padding:
+      38px 25px 29px;
+  }
+
+  .auth-brand h1 {
+    font-size: 29px;
+  }
+
+  .auth-symbol {
+    width: 46px;
+    height: 46px;
+  }
+
+}
